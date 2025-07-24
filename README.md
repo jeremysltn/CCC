@@ -26,7 +26,7 @@ Ever wonder if you're overpaying for that $200/month Claude Max subscription? CC
    python CCC.py
    ```
 
-## Output
+## 📊 Sample Output
 
 ![CCC Demo](https://i.imgur.com/EDU8WM8.jpeg)
 
