@@ -8,33 +8,85 @@ from rich.text import Text
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich import box
 
+def calculate_model_cost(model_totals):
+    """
+    Calculate cost for each model type with their specific pricing
+    """
+    # Model-specific pricing per 1M tokens
+    pricing = {
+        'sonnet': {
+            'input_per_1M': 3.00,
+            'output_per_1M': 15.00,
+            'cache_write_per_1M': 3.75,
+            'cache_read_per_1M': 0.30
+        },
+        'opus': {
+            'input_per_1M': 15.00,
+            'output_per_1M': 75.00,
+            'cache_write_per_1M': 18.75,
+            'cache_read_per_1M': 1.50
+        },
+        'other': {
+            'input_per_1M': 3.00,  # Default to Sonnet pricing
+            'output_per_1M': 15.00,
+            'cache_write_per_1M': 3.75,
+            'cache_read_per_1M': 0.30
+        }
+    }
+    
+    total_calculated_cost = 0
+    model_costs = {}
+    
+    for model_type, totals in model_totals.items():
+        if totals['count'] > 0:  # Only calculate if model was used
+            rates = pricing[model_type]
+            calculated_cost = (
+                (totals['tokensIn'] / 1_000_000) * rates['input_per_1M'] +
+                (totals['tokensOut'] / 1_000_000) * rates['output_per_1M'] +
+                (totals['cacheWrites'] / 1_000_000) * rates['cache_write_per_1M'] +
+                (totals['cacheReads'] / 1_000_000) * rates['cache_read_per_1M']
+            )
+            model_costs[model_type] = {
+                'calculated_cost': calculated_cost,
+                'rates': rates
+            }
+            total_calculated_cost += calculated_cost
+    
+    return model_costs, total_calculated_cost
+
 def calculate_token_usage(base_path, silent=False):
     """
     Calculate total token usage from ui_messages.json files in subdirectories
-    that contain Claude Code tasks (filtered by task_metadata.json)
+    that contain Claude Code tasks (filtered by task_metadata.json and model_id)
     """
-    totals = {
-        'tokensIn': 0,
-        'tokensOut': 0,
-        'cacheWrites': 0,
-        'cacheReads': 0,
-        'cost': 0.0
+    # Track totals by model type
+    model_totals = {
+        'sonnet': {
+            'tokensIn': 0, 'tokensOut': 0, 'cacheWrites': 0, 'cacheReads': 0, 
+            'cost': 0.0, 'count': 0
+        },
+        'opus': {
+            'tokensIn': 0, 'tokensOut': 0, 'cacheWrites': 0, 'cacheReads': 0, 
+            'cost': 0.0, 'count': 0
+        },
+        'other': {
+            'tokensIn': 0, 'tokensOut': 0, 'cacheWrites': 0, 'cacheReads': 0, 
+            'cost': 0.0, 'count': 0
+        }
     }
     
     file_count = 0
     entry_count = 0
-    skipped_count = 0  # Track files skipped (not Claude Code tasks)
-    timestamps = []  # Store all timestamps to calculate date range
-    request_data = []  # Store individual request data for accurate daily stats
+    skipped_count = 0
+    timestamps = []
+    request_data = []
     
-    # Convert to Path object for easier handling
     base_path = Path(base_path)
     
-    # Check if base path exists
     if not base_path.exists():
         if not silent:
             print(f"Error: Path {base_path} does not exist")
-        return totals, file_count, entry_count, skipped_count, timestamps, request_data
+        return model_totals, file_count, entry_count, skipped_count, timestamps, request_data
     
     # Iterate through all subdirectories
     for folder in base_path.iterdir():
@@ -42,36 +94,40 @@ def calculate_token_usage(base_path, silent=False):
             json_file = folder / "ui_messages.json"
             metadata_file = folder / "task_metadata.json"
             
-            # Check if both files exist
             if json_file.exists() and metadata_file.exists():
-                # First, check if this is a Claude Code task
                 try:
                     with open(metadata_file, 'r', encoding='utf-8') as f:
                         metadata = json.load(f)
                     
-                    # Check if any model_usage entry has model_provider_id == "claude-code"
                     is_claude_code_task = False
+                    current_model_type = 'other'
+                    
                     if 'model_usage' in metadata:
                         for usage in metadata['model_usage']:
                             if usage.get('model_provider_id') == 'claude-code':
                                 is_claude_code_task = True
+                                model_id = usage.get('model_id', '')
+                                
+                                if model_id.startswith('claude-sonnet-4'):
+                                    current_model_type = 'sonnet'
+                                elif model_id.startswith('claude-opus-4'):
+                                    current_model_type = 'opus'
+                                else:
+                                    current_model_type = 'other'
                                 break
                     
-                    # Count and skip this folder if it's not a Claude Code task
                     if not is_claude_code_task:
                         skipped_count += 1
                         continue
                         
                 except (FileNotFoundError, json.JSONDecodeError, KeyError):
-                    # Count and skip folder if metadata file is missing or invalid
                     skipped_count += 1
                     continue
             else:
-                # Count folders that don't have the required files
                 skipped_count += 1
                 continue
                 
-            # Now process the ui_messages.json file
+            # Process the ui_messages.json file
             try:
                 with open(json_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
@@ -80,34 +136,30 @@ def calculate_token_usage(base_path, silent=False):
                 if not silent:
                     print(f"Processing: {json_file}")
                 
-                # Process each entry in the JSON array
                 for entry in data:
                     if isinstance(entry, dict) and entry.get('type') == 'say' and entry.get('say') == 'api_req_started':
                         try:
-                            # Store timestamp for date range calculation
                             if 'ts' in entry:
                                 timestamps.append(entry['ts'])
                             
-                            # Parse the nested JSON in the 'text' field
                             text_data = json.loads(entry['text'])
                             
-                            # Extract token usage data
                             tokens_in = text_data.get('tokensIn', 0)
                             tokens_out = text_data.get('tokensOut', 0)
                             cache_writes = text_data.get('cacheWrites', 0)
                             cache_reads = text_data.get('cacheReads', 0)
                             cost = text_data.get('cost', 0.0)
                             
-                            # Add to totals
-                            totals['tokensIn'] += tokens_in
-                            totals['tokensOut'] += tokens_out
-                            totals['cacheWrites'] += cache_writes
-                            totals['cacheReads'] += cache_reads
-                            totals['cost'] += cost
+                            # Add to model-specific totals
+                            model_totals[current_model_type]['tokensIn'] += tokens_in
+                            model_totals[current_model_type]['tokensOut'] += tokens_out
+                            model_totals[current_model_type]['cacheWrites'] += cache_writes
+                            model_totals[current_model_type]['cacheReads'] += cache_reads
+                            model_totals[current_model_type]['cost'] += cost
+                            model_totals[current_model_type]['count'] += 1
                             
                             entry_count += 1
                             
-                            # Store individual request data
                             if 'ts' in entry:
                                 request_data.append({
                                     'timestamp': entry['ts'],
@@ -115,14 +167,13 @@ def calculate_token_usage(base_path, silent=False):
                                     'tokensOut': tokens_out,
                                     'cacheWrites': cache_writes,
                                     'cacheReads': cache_reads,
-                                    'cost': cost
+                                    'cost': cost,
+                                    'model_type': current_model_type
                                 })
                             
                         except json.JSONDecodeError:
-                            # Skip entries where 'text' is not valid JSON
                             continue
                         except (KeyError, TypeError):
-                            # Skip entries with missing or invalid data
                             continue
                             
             except FileNotFoundError:
@@ -135,42 +186,33 @@ def calculate_token_usage(base_path, silent=False):
                 if not silent:
                     print(f"Error processing {json_file}: {e}")
     
-    return totals, file_count, entry_count, skipped_count, timestamps, request_data
+    return model_totals, file_count, entry_count, skipped_count, timestamps, request_data
 
 def calculate_monthly_average(calculated_cost, timestamps):
-    """
-    Calculate monthly average cost based on actual usage period
-    """
     if not timestamps:
         return 0, 0, "No usage data found"
     
     from datetime import datetime
     
-    # Convert timestamps from milliseconds to datetime objects
     dates = [datetime.fromtimestamp(ts / 1000) for ts in timestamps]
     dates.sort()
     
     earliest_date = dates[0]
     latest_date = dates[-1]
-    
-    # Calculate the time span in days
     time_span = (latest_date - earliest_date).days
     
     if time_span == 0:
-        # All usage in one day
         return calculated_cost * 30, time_span, f"All usage on {earliest_date.strftime('%Y-%m-%d')}"
     
-    # Calculate monthly average
-    months_span = time_span / 30.44  # Average days per month
+    months_span = time_span / 30.44
     monthly_average = calculated_cost / months_span if months_span > 0 else calculated_cost
-    
     date_range = f"{earliest_date.strftime('%Y-%m-%d')} to {latest_date.strftime('%Y-%m-%d')}"
     
     return monthly_average, time_span, date_range
 
-def calculate_daily_usage_stats(request_data):
+def calculate_daily_usage_stats(request_data, model_costs):
     """
-    Calculate daily usage statistics based on actual request data
+    Calculate daily usage statistics based on actual request data with model-specific pricing
     """
     if not request_data:
         return {}
@@ -186,16 +228,28 @@ def calculate_daily_usage_stats(request_data):
     daily_costs = defaultdict(float)
     daily_requests = defaultdict(int)
     
-    # Process each request with its actual data
+    # Process each request with model-specific pricing
     for request in request_data:
         date = datetime.fromtimestamp(request['timestamp'] / 1000).date()
+        model_type = request.get('model_type', 'other')
         
-        # Use actual token counts from each request
+        # Calculate accurate cost using model-specific rates
+        if model_type in model_costs:
+            rates = model_costs[model_type]['rates']
+            accurate_cost = (
+                (request['tokensIn'] / 1_000_000) * rates['input_per_1M'] +
+                (request['tokensOut'] / 1_000_000) * rates['output_per_1M'] +
+                (request['cacheWrites'] / 1_000_000) * rates['cache_write_per_1M'] +
+                (request['cacheReads'] / 1_000_000) * rates['cache_read_per_1M']
+            )
+        else:
+            accurate_cost = request['cost']  # Fallback to reported cost
+        
         daily_tokens_in[date] += request['tokensIn']
         daily_tokens_out[date] += request['tokensOut']
         daily_cache_writes[date] += request['cacheWrites']
         daily_cache_reads[date] += request['cacheReads']
-        daily_costs[date] += request['cost']
+        daily_costs[date] += accurate_cost
         daily_requests[date] += 1
     
     if not daily_costs:
@@ -225,35 +279,20 @@ def calculate_daily_usage_stats(request_data):
     
     return stats
 
-def calculate_cost_from_usage(totals):
-    """
-    Calculate cost based on token usage with provided rates
-    Rates per 1M tokens/operations:
-    - Input: $3.00
-    - Output: $15.00
-    - Cache Write: $3.75
-    - Cache Read: $0.30
-    """
-    rates = {
-        'input_per_1M': 3.00,
-        'output_per_1M': 15.00,
-        'cache_write_per_1M': 3.75,
-        'cache_read_per_1M': 0.30
+def get_combined_totals(model_totals):
+    """Combine all model totals for display"""
+    combined = {
+        'tokensIn': sum(m['tokensIn'] for m in model_totals.values()),
+        'tokensOut': sum(m['tokensOut'] for m in model_totals.values()),
+        'cacheWrites': sum(m['cacheWrites'] for m in model_totals.values()),
+        'cacheReads': sum(m['cacheReads'] for m in model_totals.values()),
+        'cost': sum(m['cost'] for m in model_totals.values())
     }
-    
-    calculated_cost = (
-        (totals['tokensIn'] / 1_000_000) * rates['input_per_1M'] +
-        (totals['tokensOut'] / 1_000_000) * rates['output_per_1M'] +
-        (totals['cacheWrites'] / 1_000_000) * rates['cache_write_per_1M'] +
-        (totals['cacheReads'] / 1_000_000) * rates['cache_read_per_1M']
-    )
-    
-    return calculated_cost, rates
+    return combined
 
 def main():
     console = Console()
     
-    # Set your base path here - using expanduser to handle ~ properly
     base_path = os.path.expanduser("~/.vscode-server/data/User/globalStorage/saoudrizwan.claude-dev/tasks")
     
     # Header
@@ -263,7 +302,6 @@ def main():
                           border_style="bright_blue"))
     console.print()
     
-    # Processing info
     console.print(f"[dim]Base path: {base_path}[/dim]")
     console.print()
     
@@ -273,19 +311,38 @@ def main():
         console=console,
     ) as progress:
         task = progress.add_task("Processing files...", total=None)
-        totals, file_count, entry_count, skipped_count, timestamps, request_data = calculate_token_usage(base_path, silent=True)
+        model_totals, file_count, entry_count, skipped_count, timestamps, request_data = calculate_token_usage(base_path, silent=True)
         progress.update(task, completed=100)
     
-    # Calculate cost based on usage
-    calculated_cost, rates = calculate_cost_from_usage(totals)
+    # Calculate costs for each model
+    model_costs, total_calculated_cost = calculate_model_cost(model_totals)
+    combined_totals = get_combined_totals(model_totals)
     
     # Calculate monthly average
-    monthly_average, time_span, date_range = calculate_monthly_average(calculated_cost, timestamps)
+    monthly_average, time_span, date_range = calculate_monthly_average(total_calculated_cost, timestamps)
     
     # Calculate daily usage statistics based on actual request data
-    daily_stats = calculate_daily_usage_stats(request_data)
+    daily_stats = calculate_daily_usage_stats(request_data, model_costs)
     
-    # Summary Table
+    # Model Distribution Table
+    if any(m['count'] > 0 for m in model_totals.values()):
+        model_table = Table(title="🤖 Model Distribution", box=box.ROUNDED, show_header=True, header_style="bold magenta", width=80)
+        model_table.add_column("Model", style="cyan", no_wrap=True)
+        model_table.add_column("API Calls", style="bright_white", justify="right")
+        model_table.add_column("Tokens", style="bright_white", justify="right")
+        model_table.add_column("Cost", style="bright_green", justify="right")
+        
+        for model_type, totals in model_totals.items():
+            if totals['count'] > 0:
+                model_name = f"Claude {model_type.title()}-4"
+                total_tokens = totals['tokensIn'] + totals['tokensOut']
+                cost = model_costs[model_type]['calculated_cost']
+                model_table.add_row(model_name, f"{totals['count']:,}", f"{total_tokens:,}", f"${cost:.4f}")
+        
+        console.print(model_table)
+        console.print()
+    
+    # Usage Summary Table
     summary_table = Table(title="📊 Usage Summary", box=box.ROUNDED, show_header=True, header_style="bold magenta", width=80)
     summary_table.add_column("Metric", style="cyan", no_wrap=True)
     summary_table.add_column("Value", style="bright_white", justify="right")
@@ -293,34 +350,50 @@ def main():
     summary_table.add_row("Files processed", f"{file_count:,}")
     summary_table.add_row("Files skipped (not Claude Code task)", f"[dim]{skipped_count:,}[/dim]")
     summary_table.add_row("API calls processed", f"{entry_count:,}")
-    summary_table.add_row("Input tokens", f"{totals['tokensIn']:,}")
-    summary_table.add_row("Output tokens", f"{totals['tokensOut']:,}")
-    summary_table.add_row("Cache writes", f"{totals['cacheWrites']:,}")
-    summary_table.add_row("Cache reads", f"{totals['cacheReads']:,}")
+    summary_table.add_row("Input tokens", f"{combined_totals['tokensIn']:,}")
+    summary_table.add_row("Output tokens", f"{combined_totals['tokensOut']:,}")
+    summary_table.add_row("Cache writes", f"{combined_totals['cacheWrites']:,}")
+    summary_table.add_row("Cache reads", f"{combined_totals['cacheReads']:,}")
     
     console.print(summary_table)
     console.print()
     
-    # Cost Breakdown Table
-    cost_table = Table(title="💸 Cost Breakdown", box=box.ROUNDED, show_header=True, header_style="bold green", width=80)
-    cost_table.add_column("Token Type", style="cyan", no_wrap=True)
-    cost_table.add_column("Count", style="bright_white", justify="right")
-    cost_table.add_column("Rate per 1M", style="yellow", justify="right")
-    cost_table.add_column("Cost", style="bright_green", justify="right")
+    # Cost Breakdown by Model
+    for model_type, totals in model_totals.items():
+        if totals['count'] > 0:
+            model_name = f"Claude {model_type.title()}-4"
+            rates = model_costs[model_type]['rates']
+            
+            cost_table = Table(title=f"💸 {model_name} Cost Breakdown", box=box.ROUNDED, show_header=True, header_style="bold green", width=80)
+            cost_table.add_column("Token Type", style="cyan", no_wrap=True)
+            cost_table.add_column("Count", style="bright_white", justify="right")
+            cost_table.add_column("Rate per 1M", style="yellow", justify="right")
+            cost_table.add_column("Cost", style="bright_green", justify="right")
+            
+            input_cost = (totals['tokensIn'] / 1_000_000) * rates['input_per_1M']
+            output_cost = (totals['tokensOut'] / 1_000_000) * rates['output_per_1M']
+            cache_write_cost = (totals['cacheWrites'] / 1_000_000) * rates['cache_write_per_1M']
+            cache_read_cost = (totals['cacheReads'] / 1_000_000) * rates['cache_read_per_1M']
+            
+            cost_table.add_row("Input tokens", f"{totals['tokensIn']:,}", f"${rates['input_per_1M']:.2f}", f"${input_cost:.4f}")
+            cost_table.add_row("Output tokens", f"{totals['tokensOut']:,}", f"${rates['output_per_1M']:.2f}", f"${output_cost:.4f}")
+            cost_table.add_row("Cache writes", f"{totals['cacheWrites']:,}", f"${rates['cache_write_per_1M']:.2f}", f"${cache_write_cost:.4f}")
+            cost_table.add_row("Cache reads", f"{totals['cacheReads']:,}", f"${rates['cache_read_per_1M']:.2f}", f"${cache_read_cost:.4f}", end_section=True)
+            cost_table.add_row(f"[bold]{model_name} TOTAL", "", "", f"[bold bright_green]${model_costs[model_type]['calculated_cost']:.4f}[/bold bright_green]")
+            
+            console.print(cost_table)
+            console.print()
     
-    input_cost = (totals['tokensIn'] / 1_000_000) * rates['input_per_1M']
-    output_cost = (totals['tokensOut'] / 1_000_000) * rates['output_per_1M']
-    cache_write_cost = (totals['cacheWrites'] / 1_000_000) * rates['cache_write_per_1M']
-    cache_read_cost = (totals['cacheReads'] / 1_000_000) * rates['cache_read_per_1M']
-    
-    cost_table.add_row("Input tokens", f"{totals['tokensIn']:,}", f"${rates['input_per_1M']:.2f}", f"${input_cost:.4f}")
-    cost_table.add_row("Output tokens", f"{totals['tokensOut']:,}", f"${rates['output_per_1M']:.2f}", f"${output_cost:.4f}")
-    cost_table.add_row("Cache writes", f"{totals['cacheWrites']:,}", f"${rates['cache_write_per_1M']:.2f}", f"${cache_write_cost:.4f}")
-    cost_table.add_row("Cache reads", f"{totals['cacheReads']:,}", f"${rates['cache_read_per_1M']:.2f}", f"${cache_read_cost:.4f}", end_section=True)
-    cost_table.add_row("[bold]TOTAL CALCULATED", "", "", f"[bold bright_green]${calculated_cost:.4f}[/bold bright_green]")
-    
-    console.print(cost_table)
-    console.print()
+    # Combined Total
+    if len([m for m in model_totals.values() if m['count'] > 0]) > 1:
+        total_table = Table(title="💰 Combined Total", box=box.ROUNDED, show_header=True, header_style="bold red", width=80)
+        total_table.add_column("Metric", style="cyan", no_wrap=True)
+        total_table.add_column("Value", style="bright_white", justify="right")
+        
+        total_table.add_row("[bold]TOTAL CALCULATED COST", f"[bold bright_green]${total_calculated_cost:.4f}[/bold bright_green]")
+        
+        console.print(total_table)
+        console.print()
     
     # Usage Period Panel
     period_content = f"""[bold]Date range:[/bold] {date_range}
@@ -337,8 +410,8 @@ def main():
         daily_table.add_column("Value", style="bright_white", justify="right")
         
         daily_table.add_row("Active coding days", f"{daily_stats['total_active_days']}")
-        # daily_table.add_row("Average cost per active day", f"${daily_stats['avg_daily_cost']:.4f}")
-        # daily_table.add_row("Peak daily cost", f"[bright_red]${daily_stats['max_daily_cost']:.4f}[/bright_red]")
+        daily_table.add_row("Average cost per active day", f"${daily_stats['avg_daily_cost']:.4f}")
+        daily_table.add_row("Peak daily cost", f"[bright_red]${daily_stats['max_daily_cost']:.4f}[/bright_red]")
         daily_table.add_row("Average daily tokens", f"{daily_stats['avg_daily_tokens']:,.0f}")
         daily_table.add_row("Peak daily tokens", f"[bright_red]{daily_stats['max_daily_tokens']:,.0f}[/bright_red]")
         daily_table.add_row("Average daily API calls", f"{daily_stats['avg_daily_requests']:.1f}")
@@ -353,10 +426,10 @@ def main():
         console.print()
     
     # Additional Statistics
-    total_tokens = totals['tokensIn'] + totals['tokensOut']
-    total_cache_ops = totals['cacheWrites'] + totals['cacheReads']
+    total_tokens = combined_totals['tokensIn'] + combined_totals['tokensOut']
+    total_cache_ops = combined_totals['cacheWrites'] + combined_totals['cacheReads']
     
-    additional_table = Table(title="📋 Additional Statistics", box=box.ROUNDED, show_header=True, header_style="bold white", width=80)
+    additional_table = Table(title="Additional Statistics", box=box.ROUNDED, show_header=True, header_style="bold white", width=80)
     additional_table.add_column("Metric", style="cyan", no_wrap=True)
     additional_table.add_column("Value", style="bright_white", justify="right")
     
@@ -366,27 +439,14 @@ def main():
     
     if entry_count > 0:
         avg_tokens_per_entry = total_tokens / entry_count
-        avg_cost_per_entry = calculated_cost / entry_count
+        avg_cost_per_entry = total_calculated_cost / entry_count
         additional_table.add_row("Average tokens per API call", f"{avg_tokens_per_entry:.1f}")
-        # additional_table.add_row("Average cost per API call", f"${avg_cost_per_entry:.4f}")
+        additional_table.add_row("Average cost per API call", f"${avg_cost_per_entry:.4f}")
     
     console.print(additional_table)
     console.print()
     
-    # Cost Comparison
-#     if totals['cost'] > 0:
-#         cost_difference = calculated_cost - totals['cost']
-#         cost_difference_percent = (cost_difference / totals['cost']) * 100 if totals['cost'] > 0 else 0
-        
-#         comparison_content = f"""[bold]Reported cost:[/bold] ${totals['cost']:.4f}
-# [bold]Calculated cost:[/bold] ${calculated_cost:.4f}
-# [bold]Difference:[/bold] {cost_difference:+.4f} ({cost_difference_percent:+.1f}%)"""
-        
-#         comparison_color = "red" if abs(cost_difference_percent) > 5 else "green"
-#         console.print(Panel(comparison_content, title="🔍 Cost Comparison", border_style=comparison_color, width=80))
-    
-    console.print()
-    console.print("[dim]💡 Tip: Install with 'pip install rich' if you see formatting issues[/dim]")
+    console.print("[dim]💡 Model-specific pricing: Sonnet-4 vs Opus-4 rates automatically detected[/dim]")
 
 if __name__ == "__main__":
     main()
