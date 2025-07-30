@@ -1,6 +1,7 @@
 import os
 import json
 import random
+import argparse
 from pathlib import Path
 from rich.console import Console
 from rich.table import Table
@@ -8,6 +9,8 @@ from rich.panel import Panel
 from rich.text import Text
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich import box
+
+VERSION = "1.0.4"
 
 def calculate_model_cost(model_totals):
     """
@@ -365,6 +368,11 @@ def calculate_monthly_costs(request_data, model_costs):
     return dict(monthly_data)
 
 def main():
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Cline Claude Cost Calculator - Analyze your Claude Code usage with Cline')
+    parser.add_argument('-v', '--version', action='version', version=f'CCC {VERSION}')
+    args = parser.parse_args()
+    
     console = Console()
     
     base_path = os.path.expanduser("~/.vscode-server/data/User/globalStorage/saoudrizwan.claude-dev/tasks")
