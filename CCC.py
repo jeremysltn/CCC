@@ -371,9 +371,12 @@ def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='Cline Claude Cost Calculator - Analyze your Claude Code usage with Cline')
     parser.add_argument('-v', '--version', action='version', version=f'CCC {VERSION}')
+    parser.add_argument('--export-svg', action='store_true', help='Export output to SVG file')
+    parser.add_argument('--export-html', action='store_true', help='Export output to HTML file')
     args = parser.parse_args()
     
-    console = Console()
+    # Enable recording if export is requested
+    console = Console(record=True if (args.export_svg or args.export_html) else False)
     
     base_path = os.path.expanduser("~/.vscode-server/data/User/globalStorage/saoudrizwan.claude-dev/tasks")
     
@@ -586,6 +589,21 @@ def main():
     
     random_tip = random.choice(tips)
     console.print(f"[dim]{random_tip}[/dim]")
+    
+    # Handle export functionality
+    if args.export_svg or args.export_html:
+        from datetime import datetime
+        current_date = datetime.now().strftime('%Y-%m-%d')
+        
+        if args.export_svg:
+            filename = f"CCC-{current_date}.svg"
+            console.save_svg(filename, title="CCC Report")
+            console.print(f"\n[green]✅ Report exported to {filename}[/green]")
+        
+        if args.export_html:
+            filename = f"CCC-{current_date}.html"
+            console.save_html(filename)
+            console.print(f"\n[green]✅ Report exported to {filename}[/green]")
 
 if __name__ == "__main__":
     main()
