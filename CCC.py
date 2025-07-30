@@ -14,17 +14,35 @@ def calculate_model_cost(model_totals):
     """
     # Model-specific pricing per 1M tokens
     pricing = {
-        'sonnet': {
+        'claude-sonnet-4': {
             'input_per_1M': 3.00,
             'output_per_1M': 15.00,
             'cache_write_per_1M': 3.75,
             'cache_read_per_1M': 0.30
         },
-        'opus': {
+        'claude-opus-4': {
             'input_per_1M': 15.00,
             'output_per_1M': 75.00,
             'cache_write_per_1M': 18.75,
             'cache_read_per_1M': 1.50
+        },
+        'claude-3-7-sonnet': {
+            'input_per_1M': 3.00,
+            'output_per_1M': 15.00,
+            'cache_write_per_1M': 3.75,
+            'cache_read_per_1M': 0.30
+        },
+        'claude-3-5-sonnet': {
+            'input_per_1M': 3.00,
+            'output_per_1M': 15.00,
+            'cache_write_per_1M': 3.75,
+            'cache_read_per_1M': 0.30
+        },
+        'claude-3-5-haiku': {
+            'input_per_1M': 0.80,
+            'output_per_1M': 4.00,
+            'cache_write_per_1M': 1.00,
+            'cache_read_per_1M': 0.08
         },
         'other': {
             'input_per_1M': 3.00,  # Default to Sonnet pricing
@@ -61,11 +79,23 @@ def calculate_token_usage(base_path, silent=False):
     """
     # Track totals by model type
     model_totals = {
-        'sonnet': {
+        'claude-sonnet-4': {
             'tokensIn': 0, 'tokensOut': 0, 'cacheWrites': 0, 'cacheReads': 0, 
             'cost': 0.0, 'count': 0
         },
-        'opus': {
+        'claude-opus-4': {
+            'tokensIn': 0, 'tokensOut': 0, 'cacheWrites': 0, 'cacheReads': 0, 
+            'cost': 0.0, 'count': 0
+        },
+        'claude-3-7-sonnet': {
+            'tokensIn': 0, 'tokensOut': 0, 'cacheWrites': 0, 'cacheReads': 0, 
+            'cost': 0.0, 'count': 0
+        },
+        'claude-3-5-sonnet': {
+            'tokensIn': 0, 'tokensOut': 0, 'cacheWrites': 0, 'cacheReads': 0, 
+            'cost': 0.0, 'count': 0
+        },
+        'claude-3-5-haiku': {
             'tokensIn': 0, 'tokensOut': 0, 'cacheWrites': 0, 'cacheReads': 0, 
             'cost': 0.0, 'count': 0
         },
@@ -109,9 +139,15 @@ def calculate_token_usage(base_path, silent=False):
                                 model_id = usage.get('model_id', '')
                                 
                                 if model_id.startswith('claude-sonnet-4'):
-                                    current_model_type = 'sonnet'
+                                    current_model_type = 'claude-sonnet-4'
                                 elif model_id.startswith('claude-opus-4'):
-                                    current_model_type = 'opus'
+                                    current_model_type = 'claude-opus-4'
+                                elif model_id.startswith('claude-3-7-sonnet'):
+                                    current_model_type = 'claude-3-7-sonnet'
+                                elif model_id.startswith('claude-3-5-sonnet'):
+                                    current_model_type = 'claude-3-5-sonnet'
+                                elif model_id.startswith('claude-3-5-haiku'):
+                                    current_model_type = 'claude-3-5-haiku'
                                 else:
                                     current_model_type = 'other'
                                 break
@@ -334,7 +370,20 @@ def main():
         
         for model_type, totals in model_totals.items():
             if totals['count'] > 0:
-                model_name = f"Claude {model_type.title()}-4"
+                # Generate appropriate model names
+                if model_type == 'claude-sonnet-4':
+                    model_name = "Claude Sonnet-4"
+                elif model_type == 'claude-opus-4':
+                    model_name = "Claude Opus-4"
+                elif model_type == 'claude-3-7-sonnet':
+                    model_name = "Claude 3.7 Sonnet"
+                elif model_type == 'claude-3-5-sonnet':
+                    model_name = "Claude 3.5 Sonnet"
+                elif model_type == 'claude-3-5-haiku':
+                    model_name = "Claude 3.5 Haiku"
+                else:
+                    model_name = f"Claude {model_type.title()}"
+                    
                 total_tokens = totals['tokensIn'] + totals['tokensOut']
                 cost = model_costs[model_type]['calculated_cost']
                 model_table.add_row(model_name, f"{totals['count']:,}", f"{total_tokens:,}", f"${cost:.4f}")
@@ -361,7 +410,20 @@ def main():
     # Cost Breakdown by Model
     for model_type, totals in model_totals.items():
         if totals['count'] > 0:
-            model_name = f"Claude {model_type.title()}-4"
+            # Generate appropriate model names
+            if model_type == 'claude-sonnet-4':
+                model_name = "Claude Sonnet-4"
+            elif model_type == 'claude-opus-4':
+                model_name = "Claude Opus-4"
+            elif model_type == 'claude-3-7-sonnet':
+                model_name = "Claude 3.7 Sonnet"
+            elif model_type == 'claude-3-5-sonnet':
+                model_name = "Claude 3.5 Sonnet"
+            elif model_type == 'claude-3-5-haiku':
+                model_name = "Claude 3.5 Haiku"
+            else:
+                model_name = f"Claude {model_type.title()}"
+                
             rates = model_costs[model_type]['rates']
             
             cost_table = Table(title=f"💸 {model_name} Cost Breakdown", box=box.ROUNDED, show_header=True, header_style="bold green", width=80)
@@ -446,7 +508,7 @@ def main():
     console.print(additional_table)
     console.print()
     
-    console.print("[dim]💡 Model-specific pricing: Sonnet-4 vs Opus-4 rates automatically detected[/dim]")
+    console.print("[dim]💡 Model-specific pricing: All Claude models automatically detected with accurate rates[/dim]")
 
 if __name__ == "__main__":
     main()
