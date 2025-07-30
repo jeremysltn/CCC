@@ -327,6 +327,43 @@ def get_combined_totals(model_totals):
     }
     return combined
 
+def calculate_monthly_costs(request_data, model_costs):
+    """Calculate monthly cost breakdown from request data"""
+    if not request_data:
+        return {}
+    
+    from datetime import datetime
+    from collections import defaultdict
+    
+    monthly_data = defaultdict(lambda: {
+        'api_calls': 0,
+        'total_tokens': 0,
+        'total_cost': 0.0
+    })
+    
+    for request in request_data:
+        date = datetime.fromtimestamp(request['timestamp'] / 1000)
+        month_key = date.strftime('%Y-%m')  # e.g., "2025-01"
+        
+        # Calculate accurate cost using model-specific rates
+        model_type = request.get('model_type', 'other')
+        if model_type in model_costs:
+            rates = model_costs[model_type]['rates']
+            accurate_cost = (
+                (request['tokensIn'] / 1_000_000) * rates['input_per_1M'] +
+                (request['tokensOut'] / 1_000_000) * rates['output_per_1M'] +
+                (request['cacheWrites'] / 1_000_000) * rates['cache_write_per_1M'] +
+                (request['cacheReads'] / 1_000_000) * rates['cache_read_per_1M']
+            )
+        else:
+            accurate_cost = request['cost']  # Fallback to reported cost
+        
+        monthly_data[month_key]['api_calls'] += 1
+        monthly_data[month_key]['total_tokens'] += request['tokensIn'] + request['tokensOut']
+        monthly_data[month_key]['total_cost'] += accurate_cost
+    
+    return dict(monthly_data)
+
 def main():
     console = Console()
     
@@ -457,7 +494,30 @@ def main():
         
         console.print(total_table)
         console.print()
-    
+
+    # Monthly Cost Breakdown
+    monthly_costs = calculate_monthly_costs(request_data, model_costs)
+    if monthly_costs:
+        monthly_table = Table(title="📅 Monthly Cost Breakdown", box=box.ROUNDED, show_header=True, header_style="bold green", width=80)
+        monthly_table.add_column("Month", style="cyan", no_wrap=True)
+        monthly_table.add_column("API Calls", style="bright_white", justify="right")
+        monthly_table.add_column("Total Tokens", style="bright_white", justify="right")
+        monthly_table.add_column("Total Cost", style="bright_green", justify="right")
+        
+        # Sort months chronologically (oldest to newest)
+        sorted_months = sorted(monthly_costs.items())
+        
+        for month, data in sorted_months:
+            monthly_table.add_row(
+                month,
+                f"{data['api_calls']:,}",
+                f"{data['total_tokens']:,}",
+                f"${data['total_cost']:.4f}"
+            )
+        
+        console.print(monthly_table)
+        console.print()
+
     # Usage Period Panel
     period_content = f"""[bold]Date range:[/bold] {date_range}
 [bold]Time span:[/bold] {time_span} days
@@ -508,7 +568,7 @@ def main():
     
     console.print(additional_table)
     console.print()
-    
+
     # Random tip selection
     tips = [
         "💡 Tip: Monitor your daily usage patterns to identify your most productive coding sessions and peak activity periods",
