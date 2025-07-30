@@ -1,5 +1,6 @@
 import os
 import json
+import random
 from pathlib import Path
 from rich.console import Console
 from rich.table import Table
@@ -508,7 +509,15 @@ def main():
     console.print(additional_table)
     console.print()
     
-    console.print("[dim]💡 Model-specific pricing: All Claude models automatically detected with accurate rates[/dim]")
+    # Random tip selection
+    tips = [
+        "💡 Tip: Monitor your daily usage patterns to identify your most productive coding sessions and peak activity periods",
+        "💡 Tip: Different Claude models excel at different tasks - track which models you use most for various coding activities",
+        "💡 Tip: Use the API call frequency and token patterns above to understand your coding workflow and productivity trends"
+    ]
+    
+    random_tip = random.choice(tips)
+    console.print(f"[dim]{random_tip}[/dim]")
 
 if __name__ == "__main__":
     main()
