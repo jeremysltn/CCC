@@ -26,6 +26,12 @@ Ever wonder if you're overpaying for that $200/month Claude Max subscription? CC
    python CCC.py
    ```
 
+## 🎯 CLI Options
+
+- **Check version**: `python CCC.py --version` or `python CCC.py -v`
+- **Export to SVG**: `python CCC.py --export-svg` (saves report as SVG file)
+- **Export to HTML**: `python CCC.py --export-html` (saves report as HTML file)
+
 ## 📊 Sample Output
 
 ![CCC Demo](https://i.imgur.com/EDU8WM8.jpeg)
@@ -44,12 +50,15 @@ Each Cline project folder contains a `ui_messages.json` file with detailed usage
 - API pricing subject to change. Check [Anthropic's official pricing](https://www.anthropic.com/pricing) for current rates.
 - **Comparisons with usage limits not included** - Claude Max subscription plans have undisclosed usage limits.
 
-## 💰 Current Claude API Pricing per 1M tokens (Sonnet / Opus)
+## 💰 Supported Models
 
-- **Input tokens**: $3.00 / $15.00
-- **Output tokens**: $15.00 / $75.00
-- **Cache writes**: $3.75 / $18.75
-- **Cache reads**: $0.30 / $1.50
+| Model | Input ($/MTok) | Output ($/MTok) | Cache Write ($/MTok) | Cache Read ($/MTok) |
+|-------|----------------|-----------------|---------------------|---------------------|
+| claude-sonnet-4 | $3.00 | $15.00 | $3.75 | $0.30 |
+| claude-opus-4 | $15.00 | $75.00 | $18.75 | $1.50 |
+| claude-3-7-sonnet | $3.00 | $15.00 | $3.75 | $0.30 |
+| claude-3-5-sonnet | $3.00 | $15.00 | $3.75 | $0.30 |
+| claude-3-5-haiku | $0.80 | $4.00 | $1.00 | $0.08 |
 
 ## 🤝 Contributing
 
